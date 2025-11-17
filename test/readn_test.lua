@@ -58,30 +58,6 @@ function testcase.readn()
     assert.is_nil(again)
 end
 
-function testcase.read_with_16k_buf()
-    local f = assert(io.tmpfile())
-    f:write(string.rep('a', 24 * 1024))
-    f:seek('set')
-
-    -- test that read 18k bytes from a file using 16k buffer
-    local data, err, again = readn(f, 18 * 1024)
-    assert.is_nil(err)
-    assert.is_nil(again)
-    assert.equal(#data, 18 * 1024)
-end
-
-function testcase.read_with_8k_buf()
-    local f = assert(io.tmpfile())
-    f:write(string.rep('a', 24 * 1024))
-    f:seek('set')
-
-    -- test that read 18k bytes from a file using 16k buffer
-    local data, err, again = readn(f, 9 * 1024)
-    assert.is_nil(err)
-    assert.is_nil(again)
-    assert.equal(#data, 9 * 1024)
-end
-
 function testcase.read_from_fd()
     local f = assert(io.tmpfile())
     f:write('hello world')

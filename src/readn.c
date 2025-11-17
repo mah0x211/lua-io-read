@@ -19,31 +19,39 @@
  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  *  IN THE SOFTWARE.
  */
+
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 // lua
 #include <lauxhlib.h>
+#include <lua.h>
 #include <lua_errno.h>
 
-#if LUA_VERSION_NUM >= 502
-static int read_lua(lua_State *L, int fd, size_t count)
+#ifndef LUA_OK
+# define LUA_OK 0
+#endif
+
+typedef struct {
+    char *buf;
+    size_t len;
+    int err;
+} read_result_t;
+
+static int pushlstring(lua_State *L)
 {
-    luaL_Buffer B = {0};
-    char *buf     = NULL;
-    ssize_t rv    = 0;
+    read_result_t *res = (read_result_t *)lua_topointer(L, 1);
 
-    luaL_buffinit(L, &B);
-    buf = luaL_buffinitsize(L, &B, count);
+    lua_settop(L, 0);
+    if (res->len) {
+        lua_pushlstring(L, res->buf, res->len);
+        return 1;
+    }
 
-RETRY:
-    rv = read(fd, buf, count);
-    switch (rv) {
-    // got error
-    case -1:
-        if (errno == EINTR) {
-            goto RETRY;
-        }
-        lua_settop(L, 0);
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (res->err) {
+        // got error
+        if (res->err == EAGAIN || res->err == EWOULDBLOCK) {
             lua_pushnil(L);
             lua_pushnil(L);
             lua_pushboolean(L, 1);
@@ -51,156 +59,130 @@ RETRY:
         }
         // got error
         lua_pushnil(L);
-        lua_errno_new(L, errno, "read");
+        lua_errno_new(L, res->err, "readn");
         return 2;
-
-    case 0:
-        // eof
-        return 0;
-
-    default:
-        luaL_pushresultsize(&B, rv);
-        return 1;
     }
-}
-
-#else
-
-static inline int read_loop(lua_State *L, char *buf, size_t buflen, int fd,
-                            size_t count)
-{
-    luaL_Buffer B = {0};
-    size_t nread  = 0;
-    int nloop     = 1;
-
-    luaL_buffinit(L, &B);
-    if (count > buflen) {
-        nloop = count / buflen + (count % buflen != 0);
-    } else {
-        buflen = count;
-    }
-
-    for (int i = 0; i < nloop; i++) {
-        ssize_t rv = 0;
-
-RETRY:
-        rv = read(fd, buf, buflen);
-        switch (rv) {
-        case -1:
-            if (errno == EINTR) {
-                goto RETRY;
-            } else if (nread) {
-                luaL_pushresult(&B);
-                return 1;
-            }
-
-            lua_settop(L, 0);
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                lua_pushnil(L);
-                lua_pushnil(L);
-                lua_pushboolean(L, 1);
-                return 3;
-            }
-            // got error
-            lua_pushnil(L);
-            lua_errno_new(L, errno, "read");
-            return 2;
-
-        case 0:
-            break;
-
-        default:
-            luaL_addlstring(&B, buf, rv);
-            nread += rv;
-            count -= rv;
-            if (count < buflen) {
-                buflen = count;
-            }
-        }
-    }
-
-    if (nread) {
-        luaL_pushresult(&B);
-        return 1;
-    }
-    lua_settop(L, 0);
+    // eof
     return 0;
 }
 
-# define BUFSIZE16K 16384
-# define BUFSIZE8K  8192
-# define BUFSIZE4K  4096
-
-static int read16k_lua(lua_State *L, int fd, size_t count)
+static int pushresult(lua_State *L, char *buf, size_t nread, int err)
 {
-    char buf[BUFSIZE16K] = {0};
-    return read_loop(L, buf, BUFSIZE16K, fd, count);
-}
+    read_result_t res = {
+        .buf = buf,
+        .len = nread,
+        .err = err,
+    };
+    int rv = 0;
 
-static int read8k_lua(lua_State *L, int fd, size_t count)
-{
-    char buf[BUFSIZE8K] = {0};
-    return read_loop(L, buf, BUFSIZE8K, fd, count);
-}
+    // call pushlstring function with pcall
+    lua_pushcclosure(L, pushlstring, 0);
+    lua_pushlightuserdata(L, &res);
+    rv = lua_pcall(L, 1, LUA_MULTRET, 0);
+    free(buf);
 
-static int read4k_lua(lua_State *L, int fd, size_t count)
-{
-    char buf[BUFSIZE4K] = {0};
-    return read_loop(L, buf, BUFSIZE4K, fd, count);
-}
+    switch (rv) {
+    case LUA_OK:
+        // return values are already pushed to the stack
+        return lua_gettop(L);
 
+    default:
+        // NOTE: In LuaJIT and Lua 5.3 does not return LUA_ERRMEM error if
+        // memory allocation fails. so, it should check the error message to
+        // determine the error type that is memory allocation error or not.
+#if LUA_VERSION_NUM == 503
+        if (!strstr(lua_tostring(L, -1), "not enough memory"))
+#elif defined(LUA_LJDIR)
+        if (!strstr(lua_tostring(L, -1), "length overflow"))
 #endif
+        {
+            // otherwise, push nil and runtime error message
+            lua_pushnil(L);
+            lua_pushvalue(L, -2);
+            lua_error_new(L, -1);
+            return 2;
+        }
+
+    case LUA_ERRMEM:
+        // memory allocation error
+        lua_pushnil(L);
+        lua_errno_new_with_message(L, ENOMEM, "read", lua_tostring(L, -2));
+        return 2;
+    }
+}
+
+static int read_lua(lua_State *L, int fd, size_t count)
+{
+    ssize_t nread = 0;
+    char *buf     = malloc(count);
+    int err       = 0;
+
+    if (!buf) {
+        // malloc error
+        lua_pushnil(L);
+        lua_errno_new(L, errno, "readn");
+        return 2;
+    }
+
+RETRY:
+    nread = read(fd, buf, count);
+    if (nread < 0) {
+        if (errno == EINTR) {
+            goto RETRY;
+        }
+        err = errno;
+    }
+    return pushresult(L, buf, (size_t)nread, err);
+}
 
 static int readall_lua(lua_State *L, int fd)
 {
-    char buf[4096] = {0};
-    ssize_t rv     = 0;
-    luaL_Buffer B  = {0};
-    ssize_t nread  = 0;
+    size_t allocsize = 1024 * 16; // 16KB per allocation
+    size_t buflen    = allocsize;
+    char *buf        = malloc(allocsize);
+    ssize_t nread    = 0;
+    size_t ntotal    = 0;
+    int err          = 0;
 
-    luaL_buffinit(L, &B);
+    if (!buf) {
+        // malloc error
+        lua_pushnil(L);
+        lua_errno_new(L, errno, "readn");
+        return 2;
+    }
 
 RETRY:
-    rv = read(fd, buf, 4096);
-    switch (rv) {
-    case -1:
+    nread = read(fd, buf + ntotal, buflen - ntotal);
+    if (nread > 0) {
+        ntotal += (size_t)nread;
+        if (ntotal == buflen) {
+            // need to expand buffer
+            size_t new_buflen = buflen + allocsize;
+            char *new_buf     = realloc(buf, new_buflen);
+            if (!new_buf) {
+                // realloc error
+                free(buf);
+                lua_pushnil(L);
+                lua_errno_new(L, errno, "readn");
+                return 2;
+            }
+            buf    = new_buf;
+            buflen = new_buflen;
+            goto RETRY;
+        }
+    } else if (nread == -1) {
         if (errno == EINTR) {
             goto RETRY;
-        } else if (nread) {
-            luaL_pushresult(&B);
-            return 1;
         }
-
-        lua_settop(L, 0);
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            lua_pushnil(L);
-            lua_pushnil(L);
-            lua_pushboolean(L, 1);
-            return 3;
-        }
-        // got error
-        lua_pushnil(L);
-        lua_errno_new(L, errno, "read");
-        return 2;
-
-    case 0:
-        // eof
-        if (nread) {
-            luaL_pushresult(&B);
-            return 1;
-        }
-        lua_settop(L, 0);
-        return 0;
-
-    default:
-        nread += rv;
-        luaL_addlstring(&B, buf, rv);
-        goto RETRY;
+        err = errno;
     }
+
+    return pushresult(L, buf, ntotal, err);
 }
 
 static int readn_lua(lua_State *L)
 {
+    struct stat st;
     int fd       = -1;
     size_t count = 0;
 
@@ -210,24 +192,17 @@ static int readn_lua(lua_State *L)
     } else {
         fd = lauxh_fileno(L, 1);
     }
-    count = lauxh_optint(L, 2, 0);
+    // get file size if regular file
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
+        count = st.st_size;
+    }
+    // get count
+    count = lauxh_optint(L, 2, count);
 
-    lua_settop(L, 1);
-#if LUA_VERSION_NUM >= 502
+    lua_settop(L, 0);
     if (count > 0) {
         return read_lua(L, fd, count);
     }
-
-#else
-    if (count >= BUFSIZE16K) {
-        return read16k_lua(L, fd, count);
-    } else if (count >= BUFSIZE8K) {
-        return read8k_lua(L, fd, count);
-    } else if (count > 0) {
-        return read4k_lua(L, fd, count);
-    }
-
-#endif
     return readall_lua(L, fd);
 }
 
