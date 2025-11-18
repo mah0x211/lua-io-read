@@ -21,6 +21,7 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -34,6 +35,8 @@
 #endif
 
 typedef struct {
+    FILE *fp;
+    int fd;
     char *buf;
     size_t len;
     int err;
@@ -66,20 +69,27 @@ static int pushlstring(lua_State *L)
     return 0;
 }
 
-static int pushresult(lua_State *L, char *buf, size_t nread, int err)
+static int pushresult(lua_State *L, read_result_t *res)
 {
-    read_result_t res = {
-        .buf = buf,
-        .len = nread,
-        .err = err,
-    };
     int rv = 0;
 
+    // only sync FILE* position when using read() (not pread())
+    if (res->fp && res->len > 0) {
+        if (fseek(res->fp, lseek(res->fd, 0, SEEK_CUR), SEEK_SET) != 0) {
+            // fseek error
+            free(res->buf);
+            lua_pushnil(L);
+            lua_errno_new(L, errno, "readn.sync");
+            return 2;
+        }
+    }
+
     // call pushlstring function with pcall
+    lua_settop(L, 0);
     lua_pushcclosure(L, pushlstring, 0);
-    lua_pushlightuserdata(L, &res);
+    lua_pushlightuserdata(L, res);
     rv = lua_pcall(L, 1, LUA_MULTRET, 0);
-    free(buf);
+    free(res->buf);
 
     switch (rv) {
     case LUA_OK:
@@ -111,13 +121,18 @@ static int pushresult(lua_State *L, char *buf, size_t nread, int err)
     }
 }
 
-static int read_lua(lua_State *L, int fd, size_t count)
+static int read_lua(lua_State *L, FILE *fp, int fd, size_t count)
 {
+    read_result_t res = {
+        .fp  = fp,
+        .fd  = fd,
+        .buf = malloc(count),
+        .len = 0,
+        .err = 0,
+    };
     ssize_t nread = 0;
-    char *buf     = malloc(count);
-    int err       = 0;
 
-    if (!buf) {
+    if (!res.buf) {
         // malloc error
         lua_pushnil(L);
         lua_errno_new(L, errno, "readn");
@@ -125,26 +140,33 @@ static int read_lua(lua_State *L, int fd, size_t count)
     }
 
 RETRY:
-    nread = read(fd, buf, count);
+    nread = read(fd, res.buf, count);
     if (nread < 0) {
         if (errno == EINTR) {
             goto RETRY;
         }
-        err = errno;
+        res.err = errno;
     }
-    return pushresult(L, buf, (size_t)nread, err);
+
+    res.len = (size_t)nread;
+    return pushresult(L, &res);
 }
 
-static int readall_lua(lua_State *L, int fd)
+static int readall_lua(lua_State *L, FILE *fp, int fd)
 {
-    size_t allocsize = 1024 * 16; // 16KB per allocation
-    size_t buflen    = allocsize;
-    char *buf        = malloc(allocsize);
-    ssize_t nread    = 0;
-    size_t ntotal    = 0;
-    int err          = 0;
+    size_t allocsize  = 1024 * 16; // 16KB per allocation
+    size_t buflen     = allocsize;
+    read_result_t res = {
+        .fp  = fp,
+        .fd  = fd,
+        .buf = malloc(allocsize),
+        .len = 0,
+        .err = 0,
+    };
+    ssize_t nread = 0;
+    size_t ntotal = 0;
 
-    if (!buf) {
+    if (!res.buf) {
         // malloc error
         lua_pushnil(L);
         lua_errno_new(L, errno, "readn");
@@ -152,46 +174,54 @@ static int readall_lua(lua_State *L, int fd)
     }
 
 RETRY:
-    nread = read(fd, buf + ntotal, buflen - ntotal);
+    nread = read(fd, res.buf + ntotal, buflen - ntotal);
     if (nread > 0) {
         ntotal += (size_t)nread;
         if (ntotal == buflen) {
             // need to expand buffer
             size_t new_buflen = buflen + allocsize;
-            char *new_buf     = realloc(buf, new_buflen);
-            if (!new_buf) {
-                // realloc error
-                free(buf);
-                lua_pushnil(L);
-                lua_errno_new(L, errno, "readn");
-                return 2;
+            char *new_buf     = realloc(res.buf, new_buflen);
+            if (new_buf) {
+                res.buf = new_buf;
+                buflen  = new_buflen;
+                goto RETRY;
             }
-            buf    = new_buf;
-            buflen = new_buflen;
-            goto RETRY;
+            // realloc error
+            res.err = errno;
         }
     } else if (nread == -1) {
         if (errno == EINTR) {
             goto RETRY;
         }
-        err = errno;
+        res.err = errno;
     }
 
-    return pushresult(L, buf, ntotal, err);
+    res.len = ntotal;
+    return pushresult(L, &res);
 }
 
 static int readn_lua(lua_State *L)
 {
     struct stat st;
+    FILE *fp     = NULL;
     int fd       = -1;
     size_t count = 0;
 
-    // check fd
     if (lauxh_isint(L, 1)) {
+        // check fd
         fd = lauxh_checkint(L, 1);
+    } else if (!(fp = lauxh_checkfile(L, 1))) {
+        fd = -1;
+    } else if (fflush(fp) != 0) {
+        // failed to flush FILE* buffer
+        lua_pushnil(L);
+        lua_errno_new(L, errno, "readn");
+        return 2;
     } else {
-        fd = lauxh_fileno(L, 1);
+        // get fd from FILE*
+        fd = fileno(fp);
     }
+
     // get file size if regular file
     if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
         count = st.st_size;
@@ -199,11 +229,10 @@ static int readn_lua(lua_State *L)
     // get count
     count = lauxh_optint(L, 2, count);
 
-    lua_settop(L, 0);
     if (count > 0) {
-        return read_lua(L, fd, count);
+        return read_lua(L, fp, fd, count);
     }
-    return readall_lua(L, fd);
+    return readall_lua(L, fp, fd);
 }
 
 LUALIB_API int luaopen_io_readn(lua_State *L)
