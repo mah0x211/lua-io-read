@@ -33,7 +33,7 @@ Reads data from the specified file handle or file descriptor.
 
 - `data:string`: read data.
 - `err:any`: error object.
-- `again:boolean`: `true` if the read operation is incomplete and the `data` is not available.
+- `again:boolean`: `true` if the read operation is incomplete (read syscall returned `EAGAIN`, `EWOULDBLOCK`, or `EINTR`) and the `data` is not available.
 
 
 ## Usage
