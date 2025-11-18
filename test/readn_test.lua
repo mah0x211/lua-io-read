@@ -70,3 +70,65 @@ function testcase.read_from_fd()
     assert.is_nil(again)
     assert.equal(data, 'hello world')
 end
+
+function testcase.read_with_offset()
+    local f = assert(io.tmpfile())
+    f:write('hello world')
+
+    -- verify initial position
+    f:seek('set')
+    local pos = f:seek()
+    assert.equal(pos, 0)
+
+    -- test normal read (no offset) first to confirm position advancement
+    local data, err, again = readn(f, 3)
+    assert.is_nil(err)
+    assert.is_nil(again)
+    assert.equal(data, 'hel')
+
+    -- verify file position has advanced after normal read
+    pos = f:seek()
+    assert.equal(pos, 3)
+
+    -- test that read with offset 0 (using pread internally)
+    data, err, again = readn(f, 5, 0)
+    assert.is_nil(err)
+    assert.is_nil(again)
+    assert.equal(data, 'hello')
+
+    -- verify file position hasn't changed after offset read
+    pos = f:seek()
+    assert.equal(pos, 3)
+
+    -- test another normal read to confirm position advancement
+    data, err, again = readn(f, 2)
+    assert.is_nil(err)
+    assert.is_nil(again)
+    assert.equal(data, 'lo')
+
+    -- verify file position advanced again
+    pos = f:seek()
+    assert.equal(pos, 5)
+
+    -- test that read with offset 2
+    data, err, again = readn(f, 5, 2)
+    assert.is_nil(err)
+    assert.is_nil(again)
+    assert.equal(data, 'llo w')
+
+    -- verify file position still at 5 after offset read
+    pos = f:seek()
+    assert.equal(pos, 5)
+
+    -- test that read with offset at end of file
+    data, err, again = readn(f, 5, 11)
+    assert.is_nil(data)
+    assert.is_nil(err)
+    assert.is_nil(again)
+
+    -- verify file position still at 5 after offset read at EOF
+    pos = f:seek()
+    assert.equal(pos, 5)
+
+    f:close()
+end

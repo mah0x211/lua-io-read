@@ -37,6 +37,7 @@
 typedef struct {
     FILE *fp;
     int fd;
+    off_t offset;
     char *buf;
     size_t len;
     int err;
@@ -74,7 +75,7 @@ static int pushresult(lua_State *L, read_result_t *res)
     int rv = 0;
 
     // only sync FILE* position when using read() (not pread())
-    if (res->fp && res->len > 0) {
+    if (res->fp && res->offset < 0 && res->len > 0) {
         if (fseek(res->fp, lseek(res->fd, 0, SEEK_CUR), SEEK_SET) != 0) {
             // fseek error
             free(res->buf);
@@ -121,14 +122,15 @@ static int pushresult(lua_State *L, read_result_t *res)
     }
 }
 
-static int read_lua(lua_State *L, FILE *fp, int fd, size_t count)
+static int read_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
 {
     read_result_t res = {
-        .fp  = fp,
-        .fd  = fd,
-        .buf = malloc(count),
-        .len = 0,
-        .err = 0,
+        .fp     = fp,
+        .fd     = fd,
+        .offset = offset,
+        .buf    = malloc(count),
+        .len    = 0,
+        .err    = 0,
     };
     ssize_t nread = 0;
 
@@ -140,7 +142,8 @@ static int read_lua(lua_State *L, FILE *fp, int fd, size_t count)
     }
 
 RETRY:
-    nread = read(fd, res.buf, count);
+    nread = (offset < 0) ? read(fd, res.buf, count) :
+                           pread(fd, res.buf, count, offset);
     if (nread < 0) {
         if (errno == EINTR) {
             goto RETRY;
@@ -152,16 +155,17 @@ RETRY:
     return pushresult(L, &res);
 }
 
-static int readall_lua(lua_State *L, FILE *fp, int fd)
+static int readall_lua(lua_State *L, FILE *fp, int fd, off_t offset)
 {
     size_t allocsize  = 1024 * 16; // 16KB per allocation
     size_t buflen     = allocsize;
     read_result_t res = {
-        .fp  = fp,
-        .fd  = fd,
-        .buf = malloc(allocsize),
-        .len = 0,
-        .err = 0,
+        .fp     = fp,
+        .fd     = fd,
+        .offset = offset,
+        .buf    = malloc(allocsize),
+        .len    = 0,
+        .err    = 0,
     };
     ssize_t nread = 0;
     size_t ntotal = 0;
@@ -174,7 +178,9 @@ static int readall_lua(lua_State *L, FILE *fp, int fd)
     }
 
 RETRY:
-    nread = read(fd, res.buf + ntotal, buflen - ntotal);
+    nread = (offset < 0) ?
+                read(fd, res.buf + ntotal, buflen - ntotal) :
+                pread(fd, res.buf + ntotal, buflen - ntotal, offset + ntotal);
     if (nread > 0) {
         ntotal += (size_t)nread;
         if (ntotal == buflen) {
@@ -206,6 +212,7 @@ static int readn_lua(lua_State *L)
     FILE *fp     = NULL;
     int fd       = -1;
     size_t count = 0;
+    off_t offset = 0;
 
     if (lauxh_isint(L, 1)) {
         // check fd
@@ -227,12 +234,14 @@ static int readn_lua(lua_State *L)
         count = st.st_size;
     }
     // get count
-    count = lauxh_optint(L, 2, count);
+    count  = lauxh_optint(L, 2, count);
+    // get offset: -1 for current position, >=0 for absolute offset
+    offset = lauxh_optint(L, 3, -1);
 
     if (count > 0) {
-        return read_lua(L, fp, fd, count);
+        return read_lua(L, fp, fd, count, offset);
     }
-    return readall_lua(L, fp, fd);
+    return readall_lua(L, fp, fd, offset);
 }
 
 LUALIB_API int luaopen_io_readn(lua_State *L)
