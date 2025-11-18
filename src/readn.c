@@ -63,7 +63,8 @@ static int pushlstring(lua_State *L)
         }
         // got error
         lua_pushnil(L);
-        lua_errno_new(L, res->err, "readn");
+        lua_errno_new(L, res->err,
+                      (res->err == ENOMEM) ? "read.alloc" : "read");
         return 2;
     }
     // eof
@@ -80,7 +81,7 @@ static int pushresult(lua_State *L, read_result_t *res)
             // fseek error
             free(res->buf);
             lua_pushnil(L);
-            lua_errno_new(L, errno, "readn.sync");
+            lua_errno_new(L, errno, "read.fseek");
             return 2;
         }
     }
@@ -117,7 +118,8 @@ static int pushresult(lua_State *L, read_result_t *res)
     case LUA_ERRMEM:
         // memory allocation error
         lua_pushnil(L);
-        lua_errno_new_with_message(L, ENOMEM, "read", lua_tostring(L, -2));
+        lua_errno_new_with_message(L, ENOMEM, "read.alloc",
+                                   lua_tostring(L, -2));
         return 2;
     }
 }
@@ -137,7 +139,7 @@ static int read_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
     if (!res.buf) {
         // malloc error
         lua_pushnil(L);
-        lua_errno_new(L, errno, "readn");
+        lua_errno_new(L, errno, "read.alloc");
         return 2;
     }
 
@@ -173,7 +175,7 @@ static int readall_lua(lua_State *L, FILE *fp, int fd, off_t offset)
     if (!res.buf) {
         // malloc error
         lua_pushnil(L);
-        lua_errno_new(L, errno, "readn");
+        lua_errno_new(L, errno, "read.alloc");
         return 2;
     }
 
@@ -224,7 +226,7 @@ static int readn_lua(lua_State *L)
         // NOTE: ignore EBADF error which means the FILE* is not opened for
         // writing
         lua_pushnil(L);
-        lua_errno_new(L, errno, "readn");
+        lua_errno_new(L, errno, "read.fflush");
         return 2;
     } else {
         // get fd from FILE*
