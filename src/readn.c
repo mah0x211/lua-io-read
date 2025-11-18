@@ -212,8 +212,10 @@ static int readn_lua(lua_State *L)
         fd = lauxh_checkint(L, 1);
     } else if (!(fp = lauxh_checkfile(L, 1))) {
         fd = -1;
-    } else if (fflush(fp) != 0) {
+    } else if (fflush(fp) != 0 && errno != EBADF) {
         // failed to flush FILE* buffer
+        // NOTE: ignore EBADF error which means the FILE* is not opened for
+        // writing
         lua_pushnil(L);
         lua_errno_new(L, errno, "readn");
         return 2;
