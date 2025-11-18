@@ -19,9 +19,9 @@ luarocks install io-readn
 the following functions return the `error` object created by https://github.com/mah0x211/lua-errno module.
 
 
-## data, err = readn( file [, count] )
+## data, err, again = readn( file [, count] )
 
-open the lua file handle from a pathname or descriptor of the file.
+Reads data from the specified file handle or file descriptor.
 
 **Parameters**
 
