@@ -55,7 +55,8 @@ static int pushlstring(lua_State *L)
 
     if (res->err) {
         // got error
-        if (res->err == EAGAIN || res->err == EWOULDBLOCK) {
+        if (res->err == EAGAIN || res->err == EWOULDBLOCK ||
+            res->err == EINTR) {
             lua_pushnil(L);
             lua_pushnil(L);
             lua_pushboolean(L, 1);
@@ -143,13 +144,9 @@ static int read_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
         return 2;
     }
 
-RETRY:
     nread = (offset < 0) ? read(fd, res.buf, count) :
                            pread(fd, res.buf, count, offset);
     if (nread < 0) {
-        if (errno == EINTR) {
-            goto RETRY;
-        }
         res.err = errno;
     }
 
@@ -198,9 +195,6 @@ RETRY:
             res.err = errno;
         }
     } else if (nread == -1) {
-        if (errno == EINTR) {
-            goto RETRY;
-        }
         res.err = errno;
     }
 
