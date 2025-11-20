@@ -125,7 +125,7 @@ static int pushresult(lua_State *L, read_result_t *res)
     }
 }
 
-static int read_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
+static int readn_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
 {
     read_result_t res = {
         .fp     = fp,
@@ -202,7 +202,7 @@ RETRY:
     return pushresult(L, &res);
 }
 
-static int readn_lua(lua_State *L)
+static int read_lua(lua_State *L)
 {
     struct stat st;
     FILE *fp     = NULL;
@@ -237,14 +237,14 @@ static int readn_lua(lua_State *L)
     offset = lauxh_optint(L, 3, -1);
 
     if (count > 0) {
-        return read_lua(L, fp, fd, count, offset);
+        return readn_lua(L, fp, fd, count, offset);
     }
     return readall_lua(L, fp, fd, offset);
 }
 
-LUALIB_API int luaopen_io_readn(lua_State *L)
+LUALIB_API int luaopen_io_read(lua_State *L)
 {
     lua_errno_loadlib(L);
-    lua_pushcfunction(L, readn_lua);
+    lua_pushcfunction(L, read_lua);
     return 1;
 }
