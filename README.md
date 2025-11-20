@@ -1,7 +1,7 @@
-# lua-io-readn
+# lua-io-read
 
-[![test](https://github.com/mah0x211/lua-io-readn/actions/workflows/test.yml/badge.svg)](https://github.com/mah0x211/lua-io-readn/actions/workflows/test.yml)
-[![codecov](https://codecov.io/gh/mah0x211/lua-io-readn/branch/master/graph/badge.svg)](https://codecov.io/gh/mah0x211/lua-io-readn)
+[![test](https://github.com/mah0x211/lua-io-read/actions/workflows/test.yml/badge.svg)](https://github.com/mah0x211/lua-io-read/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/mah0x211/lua-io-read/branch/master/graph/badge.svg)](https://codecov.io/gh/mah0x211/lua-io-read)
 
 Reads data from a specified file descriptor.
 
@@ -9,7 +9,7 @@ Reads data from a specified file descriptor.
 ## Installation
 
 ```
-luarocks install io-readn
+luarocks install io-read
 ```
 
 ---
@@ -19,7 +19,7 @@ luarocks install io-readn
 the following functions return the `error` object created by https://github.com/mah0x211/lua-errno module.
 
 
-## data, err, again = readn( file [, count [, offset]] )
+## data, err, again = read( file [, count [, offset]] )
 
 Reads data from the specified file handle or file descriptor.
 
@@ -39,11 +39,11 @@ Reads data from the specified file handle or file descriptor.
 ## Usage
 
 ```lua
-local readn = require('io.readn')
+local read = require('io.read')
 local f = assert(io.open('./test.txt'))
 
 -- read 10 bytes from the file
-local data, err, again = readn(f, 10)
+local data, err, again = read(f, 10)
 if data then
     print(data)
 elseif again then

@@ -1,11 +1,11 @@
-package = "io-readn"
+package = "io-read"
 version = "dev-1"
 source = {
-    url = "git+https://github.com/mah0x211/lua-io-readn.git",
+    url = "git+https://github.com/mah0x211/lua-io-read.git",
 }
 description = {
     summary = "Reads data from a specified file descriptor.",
-    homepage = "https://github.com/mah0x211/lua-io-readn",
+    homepage = "https://github.com/mah0x211/lua-io-read",
     license = "MIT/X11",
     maintainer = "Masatoshi Fukunaga",
 }
@@ -22,7 +22,7 @@ build = {
         WARNINGS = "-Wall -Wno-trigraphs -Wmissing-field-initializers -Wreturn-type -Wmissing-braces -Wparentheses -Wno-switch -Wunused-function -Wunused-label -Wunused-parameter -Wunused-variable -Wunused-value -Wuninitialized -Wunknown-pragmas -Wshadow -Wsign-compare",
         CPPFLAGS = "-I$(LUA_INCDIR)",
         LDFLAGS = "$(LIBFLAG)",
-        IO_READN_COVERAGE = "$(IO_READN_COVERAGE)",
+        IO_READ_COVERAGE = "$(IO_READ_COVERAGE)",
     },
     install_variables = {
         LIB_EXTENSION = "$(LIB_EXTENSION)",

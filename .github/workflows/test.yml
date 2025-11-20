@@ -48,7 +48,7 @@ jobs:
     -
       name: Install
       run: |
-        luarocks make IO_READN_COVERAGE=1
+        luarocks make rockspecs/io-read-dev-1.rockspec IO_READ_COVERAGE=1
     -
       name: Install Tools
       run: |
