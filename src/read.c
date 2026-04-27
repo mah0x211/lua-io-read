@@ -146,11 +146,11 @@ static int readn_lua(lua_State *L, FILE *fp, int fd, size_t count, off_t offset)
 
     nread = (offset < 0) ? read(fd, res.buf, count) :
                            pread(fd, res.buf, count, offset);
-    if (nread < 0) {
+    if (nread > 0) {
+        res.len = (size_t)nread;
+    } else if (nread < 0) {
         res.err = errno;
     }
-
-    res.len = (size_t)nread;
     return pushresult(L, &res);
 }
 
