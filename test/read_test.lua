@@ -58,6 +58,21 @@ function testcase.read()
     assert.is_nil(again)
 end
 
+function testcase.read_with_count_error()
+    local f = assert(io.tmpfile())
+    f:write('hello world')
+    f:seek('set')
+    f:close()
+
+    -- test that read with count returns error on closed file (EBADF)
+    -- before the fix, readn_lua() set res.len = (size_t)(-1) on failure,
+    -- causing lua_pushlstring to be called with a huge length → crash
+    local data, err, again = read(f, 5)
+    assert.is_nil(data)
+    assert.is_nil(again)
+    assert.match(err, 'EBADF')
+end
+
 function testcase.read_from_fd()
     local f = assert(io.tmpfile())
     f:write('hello world')
@@ -69,6 +84,29 @@ function testcase.read_from_fd()
     assert.is_nil(err)
     assert.is_nil(again)
     assert.equal(data, 'hello world')
+end
+
+function testcase.read_interleaved()
+    local f = assert(io.tmpfile())
+    f:write('foobarbaz')
+    f:seek('set')
+
+    -- test interleaved file:read() and read()
+    local first = f:read(3)
+    assert.equal(first, 'foo')
+
+    local data, err, again = read(f, 3)
+    assert.is_nil(err)
+    assert.is_nil(again)
+    assert.equal(data, 'bar')
+
+    -- FILE* position must be resynced after read(), so f:read()
+    -- continues from the correct offset
+    local third = f:read(3)
+    assert.equal(third, 'baz')
+
+    local pos = f:seek()
+    assert.equal(pos, 9)
 end
 
 function testcase.read_with_offset()
