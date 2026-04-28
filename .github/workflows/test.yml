@@ -56,6 +56,7 @@ jobs:
         apt-get install lcov -y
         luarocks install testcase
         luarocks install io-fileno
+        luarocks install os-pipe
     -
       name: Run Test
       run: |
