@@ -20,15 +20,18 @@
  *  IN THE SOFTWARE.
  */
 
+// depend
+#include "lauxhlib.h"
+#include "lua_errno.h"
+#include "lua_error.h"
+// lua
+#include <lauxlib.h>
+// system
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
-// lua
-#include <lauxhlib.h>
-#include <lua.h>
-#include <lua_errno.h>
 
 #ifndef LUA_OK
 # define LUA_OK 0
