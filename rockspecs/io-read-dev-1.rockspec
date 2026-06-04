@@ -12,11 +12,12 @@ description = {
 }
 dependencies = {
     "lua >= 5.1",
+    "error >= 0.14.0",
     "errno >= 0.5.0",
     "lauxhlib >= 0.6.0",
 }
 build_dependencies = {
-    "luarocks-build-hooks >= 0.6.0",
+    "luarocks-build-hooks >= 0.8.0",
     "configh >= 0.3.0",
 }
 build = {
@@ -35,6 +36,13 @@ build = {
         },
     },
     modules = {
-        ["io.read"] = "src/read.c",
+        ["io.read"] = {
+            sources = "src/read.c",
+            incdirs = {
+                "$(DEP_ERROR_INCDIR)",
+                "$(DEP_ERRNO_INCDIR)",
+                "$(DEP_LAUXHLIB_INCDIR)",
+            },
+        },
     },
 }

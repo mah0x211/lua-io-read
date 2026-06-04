@@ -24,6 +24,7 @@ jobs:
         luacheck --no-self .
 
   test:
+    needs: luacheck
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/mah0x211/lua-ci:latest
@@ -53,7 +54,6 @@ jobs:
     -
       name: Install Tools
       run: |
-        apt-get install lcov -y
         luarocks install testcase
         luarocks install io-fileno
         luarocks install os-pipe
